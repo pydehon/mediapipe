@@ -1,0 +1,38 @@
+# MediaPipe graph to detect faces. (GPU input and inference.)
+
+type: "FaceDetectionFullRangeGpu"
+
+# The input image, either GpuBuffer, or (multi-backend) Image.
+input_stream: "IMAGE:image"
+
+# Detected faces. (std::vector<Detection>)
+output_stream: "DETECTIONS:detections"
+
+graph_options: {
+  [type.googleapis.com/mediapipe.FaceDetectionOptions] {}
+}
+
+node: {
+calculator: "ColorConvertCalculator"
+input_stream: "RGB_IN:image"
+output_stream: "RGBA_OUT:image_rgba"
+}
+
+node: {
+calculator: "ImageFrameToGpuBufferCalculator"
+input_stream: "image_rgba"
+output_stream: "image_gpu"
+}
+
+node {
+  calculator: "FaceDetectionFullRange"
+  input_stream: "IMAGE:image_gpu"
+  output_stream: "DETECTIONS:detections"
+  node_options: {
+    [type.googleapis.com/mediapipe.FaceDetectionOptions] {
+      gpu_origin: TOP_LEFT
+      delegate: { gpu { use_advanced_gpu_api: true } }
+    }
+  }
+  option_value: "OPTIONS:options"
+}
