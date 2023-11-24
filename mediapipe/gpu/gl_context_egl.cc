@@ -112,13 +112,21 @@ GlContext::StatusOrGlContext GlContext::Create(EGLContext share_context,
   return std::move(context);
 }
 
-static std::array<EGLint, 16> MakeEglConfig(EGLint gl_version, EGLint buffer_type) {
-  return {
+absl::Status GlContext::CreateContextInternal(EGLContext share_context,
+                                              int gl_version) {
+  CHECK(gl_version == 2 || gl_version == 3);
+
+  const EGLint config_attr[] = {
       // clang-format off
-      EGL_RENDERABLE_TYPE, gl_version,
+      EGL_RENDERABLE_TYPE, gl_version == 3 ? EGL_OPENGL_ES3_BIT_KHR
+                                           : EGL_OPENGL_ES2_BIT,
       // Allow rendering to pixel buffers or directly to windows.
       EGL_SURFACE_TYPE,
-      buffer_type,
+#ifdef MEDIAPIPE_OMIT_EGL_WINDOW_BIT
+      EGL_PBUFFER_BIT,
+#else
+      EGL_WINDOW_BIT,
+#endif
       EGL_RED_SIZE, 8,
       EGL_GREEN_SIZE, 8,
       EGL_BLUE_SIZE, 8,
@@ -127,30 +135,15 @@ static std::array<EGLint, 16> MakeEglConfig(EGLint gl_version, EGLint buffer_typ
       EGL_NONE
       // clang-format on
   };
-}
 
-absl::Status GlContext::CreateContextInternal(EGLContext share_context,
-                                              int gl_version) {
-  CHECK(gl_version == 2 || gl_version == 3);
-
-  EGLint gl_version_flag = gl_version == 3 ? EGL_OPENGL_ES3_BIT_KHR : EGL_OPENGL_ES2_BIT;
-
-  std::vector<std::array<EGLint, 16>> configs{
-    MakeEglConfig(gl_version_flag, EGL_PBUFFER_BIT),
-    MakeEglConfig(gl_version_flag, EGL_WINDOW_BIT)
-  };
-
+  // TODO: improve config selection.
   EGLint num_configs;
-  
-  for (auto cfg : configs) {
-    EGLBoolean success =
-        eglChooseConfig(display_, &cfg[0], &config_, 1, &num_configs);
-    if (!success) {
-      return ::mediapipe::UnknownErrorBuilder(MEDIAPIPE_LOC)
-             << "eglChooseConfig() returned error " << std::showbase << std::hex
-             << eglGetError();
-    }
-    if (num_configs) break;
+  EGLBoolean success =
+      eglChooseConfig(display_, config_attr, &config_, 1, &num_configs);
+  if (!success) {
+    return ::mediapipe::UnknownErrorBuilder(MEDIAPIPE_LOC)
+           << "eglChooseConfig() returned error " << std::showbase << std::hex
+           << eglGetError();
   }
   if (!num_configs) {
     return mediapipe::UnknownErrorBuilder(MEDIAPIPE_LOC)
@@ -192,13 +185,6 @@ absl::Status GlContext::CreateContext(EGLContext share_context) {
     status = CreateContextInternal(share_context, 2);
   }
   MP_RETURN_IF_ERROR(status);
-
-  EGLint pbuffer_attr[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
-
-  surface_ = eglCreatePbufferSurface(display_, config_, pbuffer_attr);
-  RET_CHECK(surface_ != EGL_NO_SURFACE)
-      << "eglCreatePbufferSurface() returned error " << std::showbase
-      << std::hex << eglGetError();
 
   return absl::OkStatus();
 }
